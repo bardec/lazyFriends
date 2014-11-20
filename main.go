@@ -53,7 +53,7 @@ func main() {
 
 func handlePullRequest(pullRequest GithubPullRequest) error {
 	switch pullRequest.Action {
-	case "opened":
+	case "opened", "reopened":
 		alertNewPullRequest(pullRequest)
 		return nil
 	}
