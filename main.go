@@ -39,7 +39,10 @@ func main() {
 			return
 		}
 
-		alertNewPullRequest(pullRequest)
+		if err := handlePullRequest(pullRequest); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(&pullRequest)
@@ -52,7 +55,7 @@ func handlePullRequest(pullRequest GithubPullRequest) error {
 	switch pullRequest.Action {
 	case "opened":
 		alertNewPullRequest(pullRequest)
-		break
+		return nil
 	}
 	errorMsg := "Not yet handling Action: " + pullRequest.Action
 	return errors.New(errorMsg)
