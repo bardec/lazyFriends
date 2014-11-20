@@ -1,75 +1,78 @@
 package main
 
 import (
+	"./secret"
 	"encoding/json"
-	"fmt"
+	"errors"
+	mailGun "github.com/mailgun/mailgun-go"
 	"net/http"
-	"strings"
+	"strconv"
 )
 
-type weatherData struct {
-	Name string `json:"name"`
-	Main struct {
-		Kelvin float64 `json:"temp"`
-	} `json:"main"`
-}
-
-type githubWebhook struct {
-	Action string `json:"action"`
+type GithubPullRequest struct {
+	Action      string `json:"action"`
+	PullRequest struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Url    string `json:"url"`
+		User   struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	} `json:"pull_request"`
 }
 
 func main() {
-	// http.HandleFunc("/", hello)
-	// http.HandleFunc("/weather/", func(w http.ResponseWriter, r *http.Request) {
-	// 	city := strings.SplitN(r.URL.Path, "/", 3)[2]
-	//
-	// 	data, err := query(city)
-	// 	if err != nil {
-	// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-	// 		return
-	// 	}
-	//
-	// 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	// 	json.NewEncoder(w).Encode(data)
-	// })
 	http.HandleFunc("/app/", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
-		var github githubWebhook
+		header := r.Header.Get("X-Github-Event")
 
-		if err := json.NewDecoder(r.Body).Decode(&github); err != nil {
+		if header != "pull_request" {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			json.NewEncoder(w).Encode(header)
+			return
+		}
+
+		var pullRequest GithubPullRequest
+		if err := json.NewDecoder(r.Body).Decode(&pullRequest); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		fmt.Printf("%s", github.Action)
+
+		alertNewPullRequest(pullRequest)
+
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		json.NewEncoder(w).Encode(github)
+		json.NewEncoder(w).Encode(&pullRequest)
 	})
+
 	http.ListenAndServe(":8080", nil)
 }
 
-func hello(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("hello!"))
+func handlePullRequest(pullRequest GithubPullRequest) error {
+	switch pullRequest.Action {
+	case "opened":
+		alertNewPullRequest(pullRequest)
+		break
+	}
+	errorMsg := "Not yet handling Action: " + pullRequest.Action
+	return errors.New(errorMsg)
 }
 
-func query(city string) (weatherData, error) {
-	resp, err := http.Get("http://api.openweathermap.org/data/2.5/weather?q=" + city)
-	if err != nil {
-		return weatherData{}, err
+func alertNewPullRequest(pullRequest GithubPullRequest) {
+	gun := mailGun.NewMailgun(secret.Domain,
+		secret.ApiKey,
+		secret.PublicApiKey)
+
+	message := gun.NewMessage(
+		"Music Collaboratory <postmaster@sandbox81f2f8104dc74714a4a50f801c022e9c.mailgun.org>",
+		"New Pull Request #"+strconv.Itoa(pullRequest.PullRequest.Number),
+		"Pull Request opened by: "+pullRequest.PullRequest.User.Login+"\n\n"+
+			"Title: "+pullRequest.PullRequest.Title+"\n"+
+			"Please review at "+pullRequest.PullRequest.Url)
+
+	for _, user := range secret.MailingList {
+		message.AddRecipient(user)
 	}
 
-	defer resp.Body.Close()
-
-	var d weatherData
-
-	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
-		return weatherData{}, err
-	}
-	fahrenheit := (d.Main.Kelvin-273.15)*1.8 + 32
-	fmt.Printf("%f in city %s\n", fahrenheit, city)
-
-	// kelvin := &d.Main.Kelvin
-	// *kelvin = fahrenheit
-	*(&d.Main.Kelvin) = fahrenheit
-	return d, nil
+	gun.Send(message)
 }
